@@ -1,3 +1,5 @@
+import org.apache.tools.ant.taskdefs.condition.Os;
+
 plugins {
     id 'application'
     id "io.freefair.lombok" version '6.3.0'
@@ -56,6 +58,10 @@ jar {
     }
 
     from {
-        "$buildDir/monosat/libmonosat.so"
+        if (Os.isFamily(Os.FAMILY_MAC)) {
+            "$buildDir/monosat/libmonosat.dylib"
+        } else {
+            "$buildDir/monosat/libmonosat.so"
+        }
     }
 }
