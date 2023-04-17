@@ -99,11 +99,12 @@ class Utils {
             for (var n : graphA.successors(p)) {
                 var predEdges = graphA.edgeValue(p, n).get();
 
-                if (!reachability.hasEdgeConnecting(p, n)) {
+                if (p == n || !reachability.hasEdgeConnecting(p, n)) {
                     predEdges.forEach(e -> edges.add(Triple.of(p, n, e)));
                 }
 
-                var txns = graphB.successors(n).stream().filter(t -> !reachability.hasEdgeConnecting(p, t))
+                var txns = graphB.successors(n).stream()
+                        .filter(t -> p == t || !reachability.hasEdgeConnecting(p, t))
                         .collect(Collectors.toList());
 
                 for (var s : txns) {
@@ -239,11 +240,11 @@ class Utils {
         for (var c : constraints) {
             color += colorStep;
             for (var e : c.getEdges1()) {
-                builder.append(String.format("\"%s\" -> \"%s\" [style=dotted,color=\"#%6x\"];\n", e.getFrom(), e.getTo(), color));
+                builder.append(String.format("\"%s\" -> \"%s\" [style=dotted,color=\"#%06x\"];\n", e.getFrom(), e.getTo(), color));
             }
 
             for (var e : c.getEdges2()) {
-                builder.append(String.format("\"%s\" -> \"%s\" [style=dashed,color=\"#%6x\"];\n", e.getFrom(), e.getTo(), color));
+                builder.append(String.format("\"%s\" -> \"%s\" [style=dashed,color=\"#%06x\"];\n", e.getFrom(), e.getTo(), color));
             }
         }
 
