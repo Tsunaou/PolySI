@@ -22,13 +22,13 @@ public class History<KeyType, ValueType> {
 	public History(Set<Long> sessions,
 			Map<Long, List<Long>> transactions,
 			Map<Long, List<Triple<Event.EventType, KeyType, ValueType>>> events) {
-		var sessionMap = sessions.stream()
+        Map<Long, Session<KeyType, ValueType>> sessionMap = sessions.stream()
 			.map(id -> Pair.of(id, addSession(id)))
 			.collect(Collectors.toMap(Pair::getKey, Pair::getValue));
 
-		var txnMap = transactions.entrySet().stream()
+        Map<Long, Transaction<KeyType, ValueType>> txnMap = transactions.entrySet().stream()
 			.flatMap(e -> e.getValue().stream().map(id -> {
-				var s = sessionMap.get(e.getKey());
+                Session<KeyType, ValueType> s = sessionMap.get(e.getKey());
 				return Pair.of(id, addTransaction(s, id));
 			})).collect(Collectors.toMap(Pair::getKey, Pair::getValue));
 
@@ -62,7 +62,7 @@ public class History<KeyType, ValueType> {
 			throw new InvalidHistoryError();
 		}
 
-		var session = new Session<KeyType, ValueType>(id);
+        Session<KeyType, ValueType> session = new Session<KeyType, ValueType>(id);
 		sessions.put(id, session);
 		return session;
 	}
@@ -72,7 +72,7 @@ public class History<KeyType, ValueType> {
 			throw new InvalidHistoryError();
 		}
 
-		var txn = new Transaction<KeyType, ValueType>(id, session);
+        Transaction<KeyType, ValueType> txn = new Transaction<KeyType, ValueType>(id, session);
 		transactions.put(id, txn);
 		session.getTransactions().add(txn);
 		return txn;
@@ -80,7 +80,7 @@ public class History<KeyType, ValueType> {
 
 	public Event<KeyType, ValueType> addEvent(Transaction<KeyType, ValueType> transaction, Event.EventType type, KeyType key,
 			ValueType value) {
-		var p = Pair.of(key, value);
+        Pair<KeyType, ValueType> p = Pair.of(key, value);
 		if (type == Event.EventType.WRITE) {
 			if (!transactions.containsKey(transaction.id) || writes.contains(p)) {
 				throw new InvalidHistoryError();
@@ -88,7 +88,7 @@ public class History<KeyType, ValueType> {
 			writes.add(p);
 		}
 
-		var ev = new Event<KeyType, ValueType>(transaction, type, key, value);
+        Event<KeyType, ValueType> ev = new Event<KeyType, ValueType>(transaction, type, key, value);
 		transaction.getEvents().add(ev);
 		return ev;
 	}

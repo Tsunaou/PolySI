@@ -15,6 +15,7 @@ import com.google.common.graph.EndpointPair;
 import com.google.common.graph.MutableValueGraph;
 import com.google.common.graph.ValueGraph;
 
+import monosat.Graph;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
 
@@ -41,22 +42,22 @@ class SISolver<KeyType, ValueType> {
     private final Map<Lit, SIConstraint<KeyType, ValueType>> constraintLiterals = new HashMap<>();
 
     boolean solve() {
-        var profiler = Profiler.getInstance();
-        var lits = Stream
+        Profiler profiler = Profiler.getInstance();
+        List<Lit> lits = Stream
                 .concat(knownLiterals.keySet().stream(),
                         constraintLiterals.keySet().stream())
                 .collect(Collectors.toList());
 
         profiler.startTick("SI_SOLVER_SOLVE");
-        var result = solver.solve(lits);
+        boolean result = solver.solve(lits);
         profiler.endTick("SI_SOLVER_SOLVE");
 
         return result;
     }
 
     Pair<Collection<Pair<EndpointPair<Transaction<KeyType, ValueType>>, Collection<Edge<KeyType>>>>, Collection<SIConstraint<KeyType, ValueType>>> getConflicts() {
-        var edges = new ArrayList<Pair<EndpointPair<Transaction<KeyType, ValueType>>, Collection<Edge<KeyType>>>>();
-        var constraints = new ArrayList<SIConstraint<KeyType, ValueType>>();
+        ArrayList<Pair<EndpointPair<Transaction<KeyType, ValueType>>, Collection<Edge<KeyType>>>> edges = new ArrayList<Pair<EndpointPair<Transaction<KeyType, ValueType>>, Collection<Edge<KeyType>>>>();
+        ArrayList<SIConstraint<KeyType, ValueType>> constraints = new ArrayList<SIConstraint<KeyType, ValueType>>();
 
         solver.getConflictClause().stream().map(Logic::not).forEach(lit -> {
             if (knownLiterals.containsKey(lit)) {
@@ -89,39 +90,39 @@ class SISolver<KeyType, ValueType> {
     SISolver(History<KeyType, ValueType> history,
             KnownGraph<KeyType, ValueType> precedenceGraph,
             Collection<SIConstraint<KeyType, ValueType>> constraints) {
-        var profiler = Profiler.getInstance();
+        Profiler profiler = Profiler.getInstance();
 
         profiler.startTick("SI_SOLVER_GEN");
         profiler.startTick("SI_SOLVER_GEN_GRAPH_A_B");
-        var graphA = createKnownGraph(history,
+        MutableValueGraph<Transaction<KeyType, ValueType>, Collection<Lit>> graphA = createKnownGraph(history,
                 precedenceGraph.getKnownGraphA());
-        var graphB = createKnownGraph(history,
+        MutableValueGraph<Transaction<KeyType, ValueType>, Collection<Lit>> graphB = createKnownGraph(history,
                 precedenceGraph.getKnownGraphB());
         profiler.endTick("SI_SOLVER_GEN_GRAPH_A_B");
 
         profiler.startTick("SI_SOLVER_GEN_REACHABILITY");
         // The reachability information is used to delete unneeded edges from
         // the generated graph
-        var matA = new MatrixGraph<>(graphA.asGraph());
-        var orderInSession = Utils.getOrderInSession(history);
-        var matAC = Utils.reduceEdges(
+        MatrixGraph<Transaction<KeyType, ValueType>> matA = new MatrixGraph<>(graphA.asGraph());
+        Map<Transaction<KeyType, ValueType>, Integer> orderInSession = Utils.getOrderInSession(history);
+        MatrixGraph<Transaction<KeyType, ValueType>> matAC = Utils.reduceEdges(
                 matA.union(
                         matA.composition(new MatrixGraph<>(graphB.asGraph(), matA.getNodeMap()))),
                 orderInSession);
-        var reachability = matAC.reachability();
+        MatrixGraph<Transaction<KeyType, ValueType>> reachability = matAC.reachability();
         profiler.endTick("SI_SOLVER_GEN_REACHABILITY");
 
         profiler.startTick("SI_SOLVER_GEN_GRAPH_A_UNION_C");
         // Known edges and unknown edges are collected separately
-        var knownEdges = Utils.getKnownEdges(graphA, graphB, matAC);
+        List<Triple<Transaction<KeyType, ValueType>, Transaction<KeyType, ValueType>, Lit>> knownEdges = Utils.getKnownEdges(graphA, graphB, matAC);
         addConstraints(constraints, graphA, graphB);
-        var unknownEdges = Utils.getUnknownEdges(graphA, graphB, reachability,
+        List<Triple<Transaction<KeyType, ValueType>, Transaction<KeyType, ValueType>, Lit>> unknownEdges = Utils.getUnknownEdges(graphA, graphB, reachability,
                 solver);
         profiler.endTick("SI_SOLVER_GEN_GRAPH_A_UNION_C");
 
         List.of(Pair.of('A', graphA), Pair.of('B', graphB)).forEach(p -> {
-            var g = p.getRight();
-            var edgesSize = g.edges().stream()
+            MutableValueGraph<Transaction<KeyType, ValueType>, Collection<Lit>> g = p.getRight();
+            Integer edgesSize = g.edges().stream()
                     .map(e -> g.edgeValue(e).get().size()).reduce(Integer::sum)
                     .orElse(0);
             System.err.printf("Graph %s edges count: %d\n", p.getLeft(),
@@ -131,16 +132,16 @@ class SISolver<KeyType, ValueType> {
                 knownEdges.size() + unknownEdges.size());
 
         profiler.startTick("SI_SOLVER_GEN_MONO_GRAPH");
-        var monoGraph = new monosat.Graph(solver);
-        var nodeMap = new HashMap<Transaction<KeyType, ValueType>, Integer>();
+        Graph monoGraph = new monosat.Graph(solver);
+        HashMap<Transaction<KeyType, ValueType>, Integer> nodeMap = new HashMap<Transaction<KeyType, ValueType>, Integer>();
 
         history.getTransactions().forEach(n -> {
             nodeMap.put(n, monoGraph.addNode());
         });
 
-        var addToMonoSAT = ((Consumer<Triple<Transaction<KeyType, ValueType>, Transaction<KeyType, ValueType>, Lit>>) e -> {
-            var n = e.getLeft();
-            var s = e.getMiddle();
+        Consumer<Triple<Transaction<KeyType, ValueType>, Transaction<KeyType, ValueType>, Lit>> addToMonoSAT = ((Consumer<Triple<Transaction<KeyType, ValueType>, Transaction<KeyType, ValueType>, Lit>>) e -> {
+            Transaction<KeyType, ValueType> n = e.getLeft();
+            Transaction<KeyType, ValueType> s = e.getMiddle();
             solver.assertEqual(e.getRight(),
                     monoGraph.addEdge(nodeMap.get(n), nodeMap.get(s)));
         });
@@ -156,9 +157,9 @@ class SISolver<KeyType, ValueType> {
     private MutableValueGraph<Transaction<KeyType, ValueType>, Collection<Lit>> createKnownGraph(
             History<KeyType, ValueType> history,
             ValueGraph<Transaction<KeyType, ValueType>, Collection<Edge<KeyType>>> knownGraph) {
-        var g = Utils.createEmptyGraph(history);
-        for (var e : knownGraph.edges()) {
-            var lit = new Lit(solver);
+        MutableValueGraph<Transaction<KeyType, ValueType>, Collection<Lit>> g = Utils.createEmptyGraph(history);
+        for (EndpointPair<Transaction<KeyType, ValueType>> e : knownGraph.edges()) {
+            Lit lit = new Lit(solver);
             knownLiterals.put(lit, Pair.of(e, knownGraph.edgeValue(e).get()));
             Utils.addEdge(g, e.source(), e.target(), lit);
         }
@@ -170,13 +171,13 @@ class SISolver<KeyType, ValueType> {
             Collection<SIConstraint<KeyType, ValueType>> constraints,
             MutableValueGraph<Transaction<KeyType, ValueType>, Collection<Lit>> graphA,
             MutableValueGraph<Transaction<KeyType, ValueType>, Collection<Lit>> graphB) {
-        var addEdges = ((Function<Collection<SIEdge<KeyType, ValueType>>, Pair<Lit, Lit>>) edges -> {
+        Function<Collection<SIEdge<KeyType, ValueType>>, Pair<Lit, Lit>> addEdges = ((Function<Collection<SIEdge<KeyType, ValueType>>, Pair<Lit, Lit>>) edges -> {
             // all means all edges exists in the graph.
             // Similar for none.
             Lit all = Lit.True, none = Lit.True;
-            for (var e : edges) {
-                var lit = new Lit(solver);
-                var not = Logic.not(lit);
+            for (SIEdge<KeyType, ValueType> e : edges) {
+                Lit lit = new Lit(solver);
+                Lit not = Logic.not(lit);
                 all = Logic.and(all, lit);
                 none = Logic.and(none, not);
                 solver.setDecisionLiteral(lit, false);
@@ -194,9 +195,9 @@ class SISolver<KeyType, ValueType> {
             return Pair.of(all, none);
         });
 
-        for (var c : constraints) {
-            var p1 = addEdges.apply(c.getEdges1());
-            var p2 = addEdges.apply(c.getEdges2());
+        for (SIConstraint<KeyType, ValueType> c : constraints) {
+            Pair<Lit, Lit> p1 = addEdges.apply(c.getEdges1());
+            Pair<Lit, Lit> p2 = addEdges.apply(c.getEdges2());
 
             constraintLiterals
                     .put(Logic.or(Logic.and(p1.getLeft(), p2.getRight()),

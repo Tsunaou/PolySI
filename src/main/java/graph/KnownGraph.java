@@ -16,6 +16,7 @@ import com.google.common.graph.MutableValueGraph;
 import com.google.common.graph.ValueGraph;
 import com.google.common.graph.ValueGraphBuilder;
 
+import history.Event;
 import org.apache.commons.lang3.tuple.Pair;
 
 import history.History;
@@ -47,7 +48,7 @@ public class KnownGraph<KeyType, ValueType> {
         // add SO edges
         history.getSessions().forEach(session -> {
             Transaction<KeyType, ValueType> prevTxn = null;
-            for (var txn : session.getTransactions()) {
+            for (Transaction<KeyType, ValueType> txn : session.getTransactions()) {
                 if (prevTxn != null) {
                     addEdge(knownGraphA, prevTxn, txn,
                             new Edge<>(EdgeType.SO, null));
@@ -57,15 +58,15 @@ public class KnownGraph<KeyType, ValueType> {
         });
 
         // add WR edges
-        var writes = new HashMap<Pair<KeyType, ValueType>, Transaction<KeyType, ValueType>>();
-        var events = history.getEvents();
+        HashMap<Pair<KeyType, ValueType>, Transaction<KeyType, ValueType>> writes = new HashMap<Pair<KeyType, ValueType>, Transaction<KeyType, ValueType>>();
+        Collection<Event<KeyType, ValueType>> events = history.getEvents();
 
         events.stream().filter(e -> e.getType() == WRITE).forEach(ev -> writes
                 .put(Pair.of(ev.getKey(), ev.getValue()), ev.getTransaction()));
 
         events.stream().filter(e -> e.getType() == READ).forEach(ev -> {
-            var writeTxn = writes.get(Pair.of(ev.getKey(), ev.getValue()));
-            var txn = ev.getTransaction();
+            Transaction<KeyType, ValueType> writeTxn = writes.get(Pair.of(ev.getKey(), ev.getValue()));
+            Transaction<KeyType, ValueType> txn = ev.getTransaction();
 
             if (writeTxn == txn) {
                 return;

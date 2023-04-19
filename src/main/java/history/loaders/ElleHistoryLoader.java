@@ -9,8 +9,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import history.Session;
+import history.Transaction;
 import org.apache.commons.lang3.tuple.Triple;
 
 import history.History;
@@ -31,17 +34,17 @@ public class ElleHistoryLoader implements HistoryLoader<Integer, ElleHistoryLoad
     @Override
     @SneakyThrows
     public History<Integer, ElleHistoryLoader.ElleValue> loadHistory() {
-        try (var in = new BufferedReader(new FileReader(historyPath.toFile()))) {
+        try (BufferedReader in = new BufferedReader(new FileReader(historyPath.toFile()))) {
             return parseFile(in);
         }
     }
 
     private History<Integer, ElleHistoryLoader.ElleValue> parseFile(BufferedReader reader) {
-        var history = new History<Integer, ElleHistoryLoader.ElleValue>();
+        History<Integer, ElleValue> history = new History<Integer, ElleHistoryLoader.ElleValue>();
         reader.lines().forEachOrdered(line -> parseLine(history, CharBuffer.wrap(line)));
 
-        var initSession = history.addSession(-1);
-        var initTxn = history.addTransaction(initSession, -1);
+        Session<Integer, ElleValue> initSession = history.addSession(-1);
+        Transaction<Integer, ElleValue> initTxn = history.addTransaction(initSession, -1);
         history.getEvents().stream().map(e -> e.getKey()).distinct()
                 .forEach(k -> history.addEvent(initTxn, EventType.WRITE, k, new ElleValue(null, null)));
 
@@ -52,11 +55,11 @@ public class ElleHistoryLoader implements HistoryLoader<Integer, ElleHistoryLoad
         assertEq(line.charAt(0), '{');
         advance(line, 1);
 
-        var keyRegex = Pattern.compile(":\\w+");
+        Pattern keyRegex = Pattern.compile(":\\w+");
         ArrayList<Triple<EventType, Integer, ElleValue>> txnValue = null;
         Integer txnProcess = null;
         while (line.charAt(0) != '}') {
-            var result = keyRegex.matcher(line.duplicate());
+            Matcher result = keyRegex.matcher(line.duplicate());
 
             if (!result.lookingAt()) {
                 throw new RuntimeException(String.format("No match in \"%s\"", line));
@@ -95,26 +98,26 @@ public class ElleHistoryLoader implements HistoryLoader<Integer, ElleHistoryLoad
             throw new RuntimeException(String.format("Missing :process or :value in \"%s\"", line.clear()));
         }
 
-        var session = history.getSession(txnProcess);
+        Session<Integer, ElleValue> session = history.getSession(txnProcess);
         if (session == null) {
             session = history.addSession(txnProcess);
         }
 
-        var txnId = history.getTransactions().size();
-        var txn = history.addTransaction(session, txnId);
+        int txnId = history.getTransactions().size();
+        Transaction<Integer, ElleValue> txn = history.addTransaction(session, txnId);
 
         txnValue.forEach(v -> history.addEvent(txn, v.getLeft(), v.getMiddle(), v.getRight()));
     }
 
     private LogType parseType(CharBuffer s) {
-        var typeMap = Map.ofEntries(
+        Map<String, LogType> typeMap = Map.ofEntries(
             entry(":invoke", LogType.INVOKE),
             entry(":ok", LogType.OK),
             entry(":fail", LogType.FAIL),
             entry(":info", LogType.INFO)
         );
 
-        for (var e : typeMap.entrySet()) {
+        for (Map.Entry<String, LogType> e : typeMap.entrySet()) {
             if (startsWith(s, e.getKey())) {
                 advance(s, e.getKey().length());
                 return e.getValue();
@@ -136,7 +139,7 @@ public class ElleHistoryLoader implements HistoryLoader<Integer, ElleHistoryLoad
         assertEq(s.charAt(0), '[');
         advance(s, 1);
 
-        var events = new ArrayList<Triple<EventType, Integer, ElleValue>>();
+        ArrayList<Triple<EventType, Integer, ElleValue>> events = new ArrayList<Triple<EventType, Integer, ElleValue>>();
         while (true) {
             skipCommaAndSpace(s);
             if (s.charAt(0) == ']') {
@@ -156,16 +159,16 @@ public class ElleHistoryLoader implements HistoryLoader<Integer, ElleHistoryLoad
         Triple<EventType, Integer, ElleValue> result;
         if (startsWith(s, ":r ")) {
             advance(s, ":r ".length());
-            var key = parseInt(s);
+            Integer key = parseInt(s);
             skipCommaAndSpace(s);
-            var list = parseList(s);
+            List<Integer> list = parseList(s);
             result = Triple.of(EventType.READ, key,
                     new ElleValue(list.isEmpty() ? null : list.get(list.size() - 1), list));
         } else if (startsWith(s, ":append ")) {
             advance(s, ":append ".length());
-            var key = parseInt(s);
+            Integer key = parseInt(s);
             skipCommaAndSpace(s);
-            var value = parseInt(s);
+            Integer value = parseInt(s);
             result = Triple.of(EventType.WRITE, key, new ElleValue(value, null));
         } else {
             throw new RuntimeException(String.format("Unknown event in \"%s\"", s));
@@ -182,7 +185,7 @@ public class ElleHistoryLoader implements HistoryLoader<Integer, ElleHistoryLoad
             i++;
         }
 
-        var result = parser.apply(s, i);
+        T result = parser.apply(s, i);
         advance(s, i);
         return result;
     }
@@ -204,7 +207,7 @@ public class ElleHistoryLoader implements HistoryLoader<Integer, ElleHistoryLoad
         assertEq(s.charAt(0), '[');
         advance(s, 1);
 
-        var list = new ArrayList<Integer>();
+        ArrayList<Integer> list = new ArrayList<Integer>();
         while (true) {
             skipCommaAndSpace(s);
             if (s.charAt(0) == ']') {

@@ -5,12 +5,10 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
 
+import history.*;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
 
-import history.History;
-import history.HistoryTransformer;
-import history.Transaction;
 import history.Event.EventType;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -20,11 +18,11 @@ public class SnapshotIsolationToSerializable implements HistoryTransformer {
     @Override
     public <T, U> History<Object, Object> transformHistory(
             History<T, U> history) {
-        var writes = new HashMap<T, Set<Transaction<T, U>>>();
-        var writePosition = new HashMap<Pair<T, U>, Pair<Transaction<T, U>, Integer>>();
+        HashMap<T, Set<Transaction<T, U>>> writes = new HashMap<T, Set<Transaction<T, U>>>();
+        HashMap<Pair<T, U>, Pair<Transaction<T, U>, Integer>> writePosition = new HashMap<Pair<T, U>, Pair<Transaction<T, U>, Integer>>();
         history.getTransactions().forEach(txn -> {
             for (int i = 0; i < txn.getEvents().size(); i++) {
-                var ev = txn.getEvents().get(i);
+                Event<T, U> ev = txn.getEvents().get(i);
                 if (ev.getType() != EventType.WRITE) {
                     continue;
                 }
@@ -36,8 +34,8 @@ public class SnapshotIsolationToSerializable implements HistoryTransformer {
             }
         });
 
-        var generator = new KVGenerator();
-        var conflictKeys = new HashMap<Pair<Transaction<T, U>, Transaction<T, U>>, Triple<GeneratedKey, GeneratedValue, GeneratedValue>>();
+        KVGenerator generator = new KVGenerator();
+        HashMap<Pair<Transaction<T, U>, Transaction<T, U>>, Triple<GeneratedKey, GeneratedValue, GeneratedValue>> conflictKeys = new HashMap<Pair<Transaction<T, U>, Transaction<T, U>>, Triple<GeneratedKey, GeneratedValue, GeneratedValue>>();
         writes.values().stream().map(ArrayList::new).forEach(list -> {
             for (int i = 0; i < list.size(); i++) {
                 for (int j = 0; j < list.size(); j++) {
@@ -52,24 +50,24 @@ public class SnapshotIsolationToSerializable implements HistoryTransformer {
             }
         });
 
-        var newHistory = new History<>();
-        for (var session : history.getSessions()) {
-            var newSession = newHistory.addSession(session.getId());
-            for (var txn : session.getTransactions()) {
-                var readTxn = newHistory.addTransaction(newSession,
+        History<Object, Object> newHistory = new History<>();
+        for (Session<T, U> session : history.getSessions()) {
+            Session<Object, Object> newSession = newHistory.addSession(session.getId());
+            for (Transaction<T, U> txn : session.getTransactions()) {
+                Transaction<Object, Object> readTxn = newHistory.addTransaction(newSession,
                         txn.getId() * 2);
-                var writeTxn = newHistory.addTransaction(newSession,
+                Transaction<Object, Object> writeTxn = newHistory.addTransaction(newSession,
                         txn.getId() * 2 + 1);
-                var conflictTxns = new HashSet<Transaction<T, U>>();
+                HashSet<Transaction<T, U>> conflictTxns = new HashSet<Transaction<T, U>>();
 
                 readTxn.setStatus(txn.getStatus());
                 writeTxn.setStatus(txn.getStatus());
 
-                for (var i = 0; i < txn.getEvents().size(); i++) {
-                    var op = txn.getEvents().get(i);
+                for (int i = 0; i < txn.getEvents().size(); i++) {
+                    Event<T, U> op = txn.getEvents().get(i);
 
                     if (op.getType() == EventType.READ) {
-                        var writePos = writePosition
+                        Pair<Transaction<T, U>, Integer> writePos = writePosition
                                 .get(Pair.of(op.getKey(), op.getValue()));
                         if (writePos != null && writePos.getLeft() == txn
                                 && writePos.getRight() < i) {
@@ -90,8 +88,8 @@ public class SnapshotIsolationToSerializable implements HistoryTransformer {
                         return;
                     }
 
-                    var op1 = conflictKeys.get(Pair.of(txn, txn2));
-                    var op2 = conflictKeys.get(Pair.of(txn2, txn));
+                    Triple<GeneratedKey, GeneratedValue, GeneratedValue> op1 = conflictKeys.get(Pair.of(txn, txn2));
+                    Triple<GeneratedKey, GeneratedValue, GeneratedValue> op2 = conflictKeys.get(Pair.of(txn2, txn));
                     newHistory.addEvent(readTxn, EventType.WRITE, op1.getLeft(),
                             op1.getMiddle());
                     newHistory.addEvent(writeTxn, EventType.READ, op1.getLeft(),

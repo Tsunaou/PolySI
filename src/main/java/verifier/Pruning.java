@@ -31,14 +31,14 @@ public class Pruning {
             return false;
         }
 
-        var profiler = Profiler.getInstance();
+        Profiler profiler = Profiler.getInstance();
         profiler.startTick("SI_PRUNE");
 
         int rounds = 1, solvedConstraints = 0, totalConstraints = constraints.size();
         boolean hasCycle = false;
         while (!hasCycle) {
             System.err.printf("Pruning round %d\n", rounds);
-            var result = pruneConstraintsWithPostChecking(knownGraph, constraints, history);
+            Pair<Integer, Boolean> result = pruneConstraintsWithPostChecking(knownGraph, constraints, history);
 
             hasCycle = result.getRight();
             solvedConstraints += result.getLeft();
@@ -60,16 +60,16 @@ public class Pruning {
     private static <KeyType, ValueType> Pair<Integer, Boolean> pruneConstraintsWithPostChecking(
             KnownGraph<KeyType, ValueType> knownGraph, Collection<SIConstraint<KeyType, ValueType>> constraints,
             History<KeyType, ValueType> history) {
-        var profiler = Profiler.getInstance();
+        Profiler profiler = Profiler.getInstance();
 
         profiler.startTick("SI_PRUNE_POST_GRAPH_A_B");
-        var graphA = new MatrixGraph<>(knownGraph.getKnownGraphA().asGraph());
-        var graphB = new MatrixGraph<>(knownGraph.getKnownGraphB().asGraph(), graphA.getNodeMap());
-        var orderInSession = Utils.getOrderInSession(history);
+        MatrixGraph<Transaction<KeyType, ValueType>> graphA = new MatrixGraph<>(knownGraph.getKnownGraphA().asGraph());
+        MatrixGraph<Transaction<KeyType, ValueType>> graphB = new MatrixGraph<>(knownGraph.getKnownGraphB().asGraph(), graphA.getNodeMap());
+        Map<Transaction<KeyType, ValueType>, Integer> orderInSession = Utils.getOrderInSession(history);
         profiler.endTick("SI_PRUNE_POST_GRAPH_A_B");
 
         profiler.startTick("SI_PRUNE_POST_GRAPH_C");
-        var graphC = graphA.composition(graphB);
+        MatrixGraph<Transaction<KeyType, ValueType>> graphC = graphA.composition(graphB);
         profiler.endTick("SI_PRUNE_POST_GRAPH_C");
 
         if (graphC.hasLoops()) {
@@ -77,16 +77,16 @@ public class Pruning {
         }
 
         profiler.startTick("SI_PRUNE_POST_REACHABILITY");
-        var reachability = Utils.reduceEdges(graphA.union(graphC), orderInSession).reachability();
+        MatrixGraph<Transaction<KeyType, ValueType>> reachability = Utils.reduceEdges(graphA.union(graphC), orderInSession).reachability();
         System.err.printf("reachability matrix sparsity: %.2f\n",
                 1 - reachability.nonZeroElements() / Math.pow(reachability.nodes().size(), 2));
         profiler.endTick("SI_PRUNE_POST_REACHABILITY");
 
-        var solvedConstraints = new ArrayList<SIConstraint<KeyType, ValueType>>();
+        ArrayList<SIConstraint<KeyType, ValueType>> solvedConstraints = new ArrayList<SIConstraint<KeyType, ValueType>>();
 
         profiler.startTick("SI_PRUNE_POST_CHECK");
-        for (var c : constraints) {
-            var conflict = checkConflict(c.getEdges1(), reachability, knownGraph);
+        for (SIConstraint<KeyType, ValueType> c : constraints) {
+            Optional<SIEdge<KeyType, ValueType>> conflict = checkConflict(c.getEdges1(), reachability, knownGraph);
             if (conflict.isPresent()) {
                 addToKnownGraph(knownGraph, c.getEdges2());
                 solvedConstraints.add(c);
@@ -116,7 +116,7 @@ public class Pruning {
 
     private static <KeyType, ValueType> void addToKnownGraph(KnownGraph<KeyType, ValueType> knownGraph,
             Collection<SIEdge<KeyType, ValueType>> edges) {
-        for (var e : edges) {
+        for (SIEdge<KeyType, ValueType> e : edges) {
             switch (e.getType()) {
             case WW:
                 knownGraph.putEdge(e.getFrom(), e.getTo(), new Edge<KeyType>(EdgeType.WW, e.getKey()));
@@ -133,7 +133,7 @@ public class Pruning {
     private static <KeyType, ValueType> Optional<SIEdge<KeyType, ValueType>> checkConflict(
             Collection<SIEdge<KeyType, ValueType>> edges, MatrixGraph<Transaction<KeyType, ValueType>> reachability,
             KnownGraph<KeyType, ValueType> knownGraph) {
-        for (var e : edges) {
+        for (SIEdge<KeyType, ValueType> e : edges) {
             switch (e.getType()) {
             case WW:
                 if (reachability.hasEdgeConnecting(e.getTo(), e.getFrom())) {
@@ -142,7 +142,7 @@ public class Pruning {
                 }
                 break;
             case RW:
-                for (var n : knownGraph.getKnownGraphA().predecessors(e.getFrom())) {
+                for (Transaction<KeyType, ValueType> n : knownGraph.getKnownGraphA().predecessors(e.getFrom())) {
                     if (reachability.hasEdgeConnecting(e.getTo(), n)) {
                         return Optional.of(e);
                         // System.err.printf("conflict edge: %s\n", e);

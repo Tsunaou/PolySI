@@ -1,12 +1,6 @@
 package verifier;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -19,6 +13,7 @@ import com.google.common.graph.MutableValueGraph;
 import com.google.common.graph.ValueGraph;
 import com.google.common.graph.ValueGraphBuilder;
 
+import history.Session;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
 
@@ -35,34 +30,34 @@ import monosat.Solver;
 
 class Utils {
     static <KeyType, ValueType> boolean verifyInternalConsistency(History<KeyType, ValueType> history) {
-        var writes = new HashMap<Pair<KeyType, ValueType>, Pair<Event<KeyType, ValueType>, Integer>>();
-        var txnWrites = new HashMap<Pair<Transaction<KeyType, ValueType>, KeyType>, ArrayList<Integer>>();
-        var getEvents = ((Function<Event.EventType, Stream<Pair<Integer, Event<KeyType, ValueType>>>>) type -> history
+        HashMap<Pair<KeyType, ValueType>, Pair<Event<KeyType, ValueType>, Integer>> writes = new HashMap<Pair<KeyType, ValueType>, Pair<Event<KeyType, ValueType>, Integer>>();
+        HashMap<Pair<Transaction<KeyType, ValueType>, KeyType>, ArrayList<Integer>> txnWrites = new HashMap<Pair<Transaction<KeyType, ValueType>, KeyType>, ArrayList<Integer>>();
+        Function<EventType, Stream<Pair<Integer, Event<KeyType, ValueType>>>> getEvents = ((Function<Event.EventType, Stream<Pair<Integer, Event<KeyType, ValueType>>>>) type -> history
                 .getTransactions().stream().flatMap(txn -> {
-                    var events = txn.getEvents();
+                List<Event<KeyType, ValueType>> events = txn.getEvents();
                     return IntStream.range(0, events.size()).mapToObj(i -> Pair.of(i, events.get(i)))
                             .filter(p -> p.getRight().getType() == type);
                 }));
 
         getEvents.apply(Event.EventType.WRITE).forEach(p -> {
-            var i = p.getLeft();
-            var ev = p.getRight();
+            Integer i = p.getLeft();
+            Event<KeyType, ValueType> ev = p.getRight();
             writes.put(Pair.of(ev.getKey(), ev.getValue()), Pair.of(ev, i));
             txnWrites.computeIfAbsent(Pair.of(ev.getTransaction(), ev.getKey()), k -> new ArrayList()).add(i);
         });
 
-        for (var p : getEvents.apply(Event.EventType.READ).collect(Collectors.toList())) {
-            var i = p.getLeft();
-            var ev = p.getRight();
-            var writeEv = writes.get(Pair.of(ev.getKey(), ev.getValue()));
+        for (Pair<Integer, Event<KeyType, ValueType>> p : getEvents.apply(Event.EventType.READ).collect(Collectors.toList())) {
+            Integer i = p.getLeft();
+            Event<KeyType, ValueType> ev = p.getRight();
+            Pair<Event<KeyType, ValueType>, Integer> writeEv = writes.get(Pair.of(ev.getKey(), ev.getValue()));
 
             if (writeEv == null) {
                 System.err.printf("%s has no corresponding write\n", ev);
                 return false;
             }
 
-            var writeIndices = txnWrites.get(Pair.of(writeEv.getLeft().getTransaction(), writeEv.getLeft().getKey()));
-            var j = Collections.binarySearch(writeIndices, writeEv.getRight());
+            ArrayList<Integer> writeIndices = txnWrites.get(Pair.of(writeEv.getLeft().getTransaction(), writeEv.getLeft().getKey()));
+            int j = Collections.binarySearch(writeIndices, writeEv.getRight());
 
             if (writeEv.getLeft().getTransaction() == ev.getTransaction()) {
                 if (j != writeIndices.size() - 1 && writeIndices.get(j + 1) < i) {
@@ -93,24 +88,24 @@ class Utils {
             MutableValueGraph<Transaction<KeyType, ValueType>, Collection<Lit>> graphA,
             MutableValueGraph<Transaction<KeyType, ValueType>, Collection<Lit>> graphB,
             MatrixGraph<Transaction<KeyType, ValueType>> reachability, Solver solver) {
-        var edges = new ArrayList<Triple<Transaction<KeyType, ValueType>, Transaction<KeyType, ValueType>, Lit>>();
+        ArrayList<Triple<Transaction<KeyType, ValueType>, Transaction<KeyType, ValueType>, Lit>> edges = new ArrayList<Triple<Transaction<KeyType, ValueType>, Transaction<KeyType, ValueType>, Lit>>();
 
-        for (var p : graphA.nodes()) {
-            for (var n : graphA.successors(p)) {
-                var predEdges = graphA.edgeValue(p, n).get();
+        for (Transaction<KeyType, ValueType> p : graphA.nodes()) {
+            for (Transaction<KeyType, ValueType> n : graphA.successors(p)) {
+                Collection<Lit> predEdges = graphA.edgeValue(p, n).get();
 
                 if (p == n || !reachability.hasEdgeConnecting(p, n)) {
                     predEdges.forEach(e -> edges.add(Triple.of(p, n, e)));
                 }
 
-                var txns = graphB.successors(n).stream()
+                List<Transaction<KeyType, ValueType>> txns = graphB.successors(n).stream()
                         .filter(t -> p == t || !reachability.hasEdgeConnecting(p, t))
                         .collect(Collectors.toList());
 
-                for (var s : txns) {
-                    var succEdges = graphB.edgeValue(n, s).get();
+                for (Transaction<KeyType, ValueType> s : txns) {
+                    Collection<Lit> succEdges = graphB.edgeValue(n, s).get();
                     predEdges.forEach(e1 -> succEdges.forEach(e2 -> {
-                        var lit = Logic.and(e1, e2);
+                        Lit lit = Logic.and(e1, e2);
                         solver.setDecisionLiteral(lit, false);
                         edges.add(Triple.of(p, s, lit));
                     }));
@@ -133,15 +128,15 @@ class Utils {
             MutableValueGraph<Transaction<KeyType, ValueType>, Collection<Lit>> graphB,
             MatrixGraph<Transaction<KeyType, ValueType>> AC) {
         return AC.edges().stream().map(e -> {
-            var n = e.source();
-            var m = e.target();
-            var firstEdge = ((Function<Optional<Collection<Lit>>, Lit>) c -> c.get().iterator().next());
+            Transaction<KeyType, ValueType> n = e.source();
+            Transaction<KeyType, ValueType> m = e.target();
+            Function<Optional<Collection<Lit>>, Lit> firstEdge = ((Function<Optional<Collection<Lit>>, Lit>) c -> c.get().iterator().next());
 
             if (graphA.hasEdgeConnecting(n, m)) {
                 return Triple.of(n, m, firstEdge.apply(graphA.edgeValue(n, m)));
             }
 
-            var middle = Sets.intersection(graphA.successors(n), graphB.predecessors(m)).iterator().next();
+            Transaction<KeyType, ValueType> middle = Sets.intersection(graphA.successors(n), graphB.predecessors(m)).iterator().next();
             return Triple.of(n, m, Logic.and(firstEdge.apply(graphA.edgeValue(n, middle)),
                     firstEdge.apply(graphB.edgeValue(middle, m))));
         }).collect(Collectors.toList());
@@ -183,12 +178,12 @@ class Utils {
             MatrixGraph<Transaction<KeyType, ValueType>> graph,
             Map<Transaction<KeyType, ValueType>, Integer> orderInSession) {
         System.err.printf("Before: %d edges\n", graph.edges().size());
-        var newGraph = MatrixGraph.ofNodes(graph);
+        MatrixGraph<Transaction<KeyType, ValueType>> newGraph = MatrixGraph.ofNodes(graph);
 
-        for (var n : graph.nodes()) {
-            var succ = graph.successors(n);
+        for (Transaction<KeyType, ValueType> n : graph.nodes()) {
+            Set<Transaction<KeyType, ValueType>> succ = graph.successors(n);
             // @formatter:off
-            var firstInSession = succ.stream()
+            Map<Session<KeyType, ValueType>, Transaction<KeyType, ValueType>> firstInSession = succ.stream()
                 .collect(Collectors.toMap(
                     m -> m.getSession(),
                     Function.identity(),
@@ -211,19 +206,19 @@ class Utils {
     static <KeyType, ValueType> String conflictsToDot(Collection<Transaction<KeyType, ValueType>> transactions,
             Collection<Pair<EndpointPair<Transaction<KeyType, ValueType>>, Collection<Edge<KeyType>>>> edges,
             Collection<SIConstraint<KeyType, ValueType>> constraints) {
-        var builder = new StringBuilder();
+        StringBuilder builder = new StringBuilder();
         builder.append("digraph {\n");
 
-        for (var txn : transactions) {
+        for (Transaction<KeyType, ValueType> txn : transactions) {
             builder.append(String.format("\"%s\";\n", txn));
         }
 
-        for (var e : edges) {
-            var pair = e.getLeft();
-            var keys = e.getRight();
-            var label = new StringBuilder();
+        for (Pair<EndpointPair<Transaction<KeyType, ValueType>>, Collection<Edge<KeyType>>> e : edges) {
+            EndpointPair<Transaction<KeyType, ValueType>> pair = e.getLeft();
+            Collection<Edge<KeyType>> keys = e.getRight();
+            StringBuilder label = new StringBuilder();
 
-            for (var k : keys) {
+            for (Edge<KeyType> k : keys) {
                 if (k.getType() != EdgeType.SO) {
                     label.append(String.format("%s %s\\n", k.getType(), k.getKey()));
                 } else {
@@ -237,13 +232,13 @@ class Utils {
 
         int colorStep = 0x1000000 / (constraints.size() + 1);
         int color = 0;
-        for (var c : constraints) {
+        for (SIConstraint<KeyType, ValueType> c : constraints) {
             color += colorStep;
-            for (var e : c.getEdges1()) {
+            for (SIEdge<KeyType, ValueType> e : c.getEdges1()) {
                 builder.append(String.format("\"%s\" -> \"%s\" [style=dotted,color=\"#%06x\"];\n", e.getFrom(), e.getTo(), color));
             }
 
-            for (var e : c.getEdges2()) {
+            for (SIEdge<KeyType, ValueType> e : c.getEdges2()) {
                 builder.append(String.format("\"%s\" -> \"%s\" [style=dashed,color=\"#%06x\"];\n", e.getFrom(), e.getTo(), color));
             }
         }
@@ -255,7 +250,7 @@ class Utils {
     static <KeyType, ValueType> String conflictsToLegacy(Collection<Transaction<KeyType, ValueType>> transactions,
             Collection<Pair<EndpointPair<Transaction<KeyType, ValueType>>, Collection<Edge<KeyType>>>> edges,
             Collection<SIConstraint<KeyType, ValueType>> constraints) {
-        var builder = new StringBuilder();
+        StringBuilder builder = new StringBuilder();
 
         edges.forEach(p -> builder.append(String.format("Edge: %s\n", p)));
         constraints.forEach(c -> builder.append(String.format("Constraint: %s\n", c)));

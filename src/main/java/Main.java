@@ -1,16 +1,10 @@
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
-import history.Event;
+import history.*;
 import history.Event.EventType;
-import history.History;
-import history.HistoryLoader;
-import history.HistoryParser;
-import history.HistoryTransformer;
-import history.Transaction;
 import history.loaders.CobraHistoryLoader;
 import history.loaders.DBCopHistoryLoader;
 import history.loaders.ElleHistoryLoader;
@@ -18,6 +12,7 @@ import history.loaders.TextHistoryLoader;
 import history.transformers.Identity;
 import history.transformers.SnapshotIsolationToSerializable;
 import lombok.SneakyThrows;
+import org.apache.commons.lang3.tuple.Pair;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -32,7 +27,7 @@ import verifier.SIVerifier;
 public class Main implements Callable<Integer> {
     @SneakyThrows
     public static void main(String[] args) {
-        var cmd = new CommandLine(new Main());
+        CommandLine cmd = new CommandLine(new Main());
         cmd.setCaseInsensitiveEnumValuesAllowed(true);
         System.exit(cmd.execute(args));
     }
@@ -65,19 +60,19 @@ class Audit implements Callable<Integer> {
 
     @Override
     public Integer call() {
-        var loader = Utils.getLoader(type, path);
+        HistoryLoader<?, ?> loader = Utils.getLoader(type, path);
 
         Pruning.setEnablePruning(!noPruning);
         SIVerifier.setCoalesceConstraints(!noCoalescing);
         SIVerifier.setDotOutput(dotOutput);
 
         profiler.startTick("ENTIRE_EXPERIMENT");
-        var pass = true;
-        var verifier = new SIVerifier<>(loader);
+        boolean pass = true;
+        SIVerifier<?, ?> verifier = new SIVerifier<>(loader);
         pass = verifier.audit();
         profiler.endTick("ENTIRE_EXPERIMENT");
 
-        for (var p : profiler.getDurations()) {
+        for (Pair<String, Long> p : profiler.getDurations()) {
             System.err.printf("%s: %dms\n", p.getKey(), p.getValue());
         }
         System.err.printf("Max memory: %s\n", Utils.formatMemory(profiler.getMaxMemory()));
@@ -111,11 +106,11 @@ class Convert implements Callable<Integer> {
 
     @Override
     public Integer call() {
-        var in = Utils.getLoader(inType, inPath);
-        var out = Utils.getLoader(outType, outPath);
-        var transformer = Utils.getTransformer(transformation);
+        HistoryLoader<?, ?> in = Utils.getLoader(inType, inPath);
+        HistoryLoader<?, ?> out = Utils.getLoader(outType, outPath);
+        HistoryTransformer transformer = Utils.getTransformer(transformation);
 
-        var history = in.loadHistory();
+        History<?, ?> history = in.loadHistory();
         history = transformer.transformHistory(history);
 
         if (!(out instanceof HistoryParser)) {
@@ -141,12 +136,12 @@ class Stat implements Callable<Integer> {
 
     @Override
     public Integer call() {
-        var loader = Utils.getLoader(type, path);
-        var history = loader.loadHistory();
+        HistoryLoader<?, ?> loader = Utils.getLoader(type, path);
+        History<?, ?> history = loader.loadHistory();
 
-        var txns = history.getTransactions();
-        var events = history.getEvents();
-        var writeFreq = events.stream()
+        Collection<? extends Transaction<?, ?>> txns = history.getTransactions();
+        Collection<? extends Event<?, ?>> events = history.getEvents();
+        ArrayList<Map.Entry<Integer, Integer>> writeFreq = events.stream()
                 .collect(Collectors.toMap(ev -> ev.getKey(), ev -> ev.getType().equals(EventType.WRITE) ? 1 : 0,
                         Integer::sum))
                 .entrySet().stream().collect(Collectors.toMap(w -> w.getValue(), w -> 1, Integer::sum)).entrySet()
@@ -187,8 +182,8 @@ class Stat implements Callable<Integer> {
     }
 
     private static boolean isReadModifyWriteTxn(Transaction<?, ?> txn) {
-        var readKeys = new HashSet<Object>();
-        for (var ev : txn.getEvents()) {
+        HashSet<Object> readKeys = new HashSet<Object>();
+        for (Event<?, ?> ev : txn.getEvents()) {
             if (ev.getType().equals(EventType.READ)) {
                 readKeys.add(ev.getKey());
             } else if (readKeys.contains(ev.getKey())) {
@@ -210,15 +205,15 @@ class Dump implements Callable<Integer> {
 
     @Override
     public Integer call() {
-        var loader = Utils.getLoader(type, path);
-        var history = loader.loadHistory();
+        HistoryLoader<?, ?> loader = Utils.getLoader(type, path);
+        History<?, ?> history = loader.loadHistory();
 
-        for (var session : history.getSessions()) {
-            for (var txn : session.getTransactions()) {
-                var events = txn.getEvents();
+        for (Session<?,?> session : history.getSessions()) {
+            for (Transaction<?, ?> txn : session.getTransactions()) {
+                List<? extends Event<?,?>> events = txn.getEvents();
                 System.out.printf("Transaction %s\n", txn);
-                for (var j = 0; j < events.size(); j++) {
-                    var ev = events.get(j);
+                for (int j = 0; j < events.size(); j++) {
+                    Event<?, ?> ev = events.get(j);
                     System.out.printf("%s\n", ev);
                 }
                 System.out.println();

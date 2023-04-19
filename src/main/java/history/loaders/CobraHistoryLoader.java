@@ -9,11 +9,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
+import java.util.*;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
@@ -43,7 +39,7 @@ public class CobraHistoryLoader implements HistoryParser<Long, CobraHistoryLoade
 
 	@Override
 	public History<Long, CobraValue> loadHistory() {
-		var files = findLogWithSuffix(".log");
+        ArrayList<File> files = findLogWithSuffix(".log");
 		return loadLogs(files);
 	}
 
@@ -59,24 +55,24 @@ public class CobraHistoryLoader implements HistoryParser<Long, CobraHistoryLoade
 
 	@SneakyThrows
 	private History<Long, CobraValue> loadLogs(ArrayList<File> opfiles) {
-		var history = new History<Long, CobraValue>();
-		var initWrites = new HashMap<Long, CobraValue>();
-		var sessionId = 0;
+        History<Long, CobraValue> history = new History<Long, CobraValue>();
+        HashMap<Long, CobraValue> initWrites = new HashMap<Long, CobraValue>();
+        int sessionId = 0;
 
 		for (File f : opfiles) {
-			try (var in = new DataInputStream(new FileInputStream(f))) {
-				var session = history.addSession(sessionId++);
+			try (DataInputStream in = new DataInputStream(new FileInputStream(f))) {
+                Session<Long, CobraValue> session = history.addSession(sessionId++);
 				extractLog(in, history, initWrites, session);
 			}
 		}
 
-		var initTxn = history.addTransaction(history.addSession(INIT_TXN_ID), INIT_TXN_ID);
-		for (var p : initWrites.entrySet()) {
+        Transaction<Long, CobraValue> initTxn = history.addTransaction(history.addSession(INIT_TXN_ID), INIT_TXN_ID);
+		for (Map.Entry<Long, CobraValue> p : initWrites.entrySet()) {
 			history.addEvent(initTxn, WRITE, p.getKey(), p.getValue());
 		}
 		initTxn.setStatus(Transaction.TransactionStatus.COMMIT);
 
-		for (var txn : history.getTransactions()) {
+		for (Transaction<Long, CobraValue> txn : history.getTransactions()) {
 			if (txn.getStatus() != Transaction.TransactionStatus.COMMIT) {
 				throw new InvalidHistoryError();
 			}
@@ -114,7 +110,7 @@ public class CobraHistoryLoader implements HistoryParser<Long, CobraHistoryLoade
 			case 'S': {
 				// TxnStart
 				assert current == null;
-				var id = in.readLong();
+                long id = in.readLong();
 
 				// NOTE: because of inconsistency of the logs, the node might be created already
 				// There are two possibilities:
@@ -129,7 +125,7 @@ public class CobraHistoryLoader implements HistoryParser<Long, CobraHistoryLoade
 			}
 			case 'C': {
 				// TxnCommit
-				var id = in.readLong();
+                long id = in.readLong();
 				assert current != null && current.getId() == id;
 				current.setStatus(Transaction.TransactionStatus.COMMIT);
 				break;
@@ -137,9 +133,9 @@ public class CobraHistoryLoader implements HistoryParser<Long, CobraHistoryLoade
 			case 'W': {
 				// (write, writeId, key, val): ?B <br>
 				assert current != null;
-				var writeId = in.readLong();
-				var key = in.readLong();
-				var value = in.readLong();
+                long writeId = in.readLong();
+                long key = in.readLong();
+                long value = in.readLong();
 
 				// use writeId as value because cobra guarantees its uniqueness
 				history.addEvent(current, WRITE, key, new CobraValue(writeId, current.getId(), value));
@@ -148,10 +144,10 @@ public class CobraHistoryLoader implements HistoryParser<Long, CobraHistoryLoade
 			case 'R': {
 				// (read, write_TxnId, writeId, key, value) : ?B <br>
 				assert current != null;
-				var writeTxnId = in.readLong();
-				var writeId = in.readLong();
-				var key = in.readLong();
-				var value = in.readLong();
+                long writeTxnId = in.readLong();
+                long writeId = in.readLong();
+                long key = in.readLong();
+                long value = in.readLong();
 
 				// NOTE: if the prev_txnid == INIT_TXNID, then we update it to keyhash as wid
 				// FIXME: separate NULL and INIT?
@@ -185,18 +181,18 @@ public class CobraHistoryLoader implements HistoryParser<Long, CobraHistoryLoade
 		}
 		Arrays.stream(logDir.listFiles()).forEach(f -> f.delete());
 
-		for (var session : history.getSessions()) {
-			try (var out = new DataOutputStream(new FileOutputStream(
+		for (Session<Long, CobraValue> session : history.getSessions()) {
+			try (DataOutputStream out = new DataOutputStream(new FileOutputStream(
 					logDir.toPath().resolve(String.format("T%d.log", session.getId())).toFile()))) {
-				for (var transaction : session.getTransactions()) {
+				for (Transaction<Long, CobraValue> transaction : session.getTransactions()) {
 					out.writeByte('S');
 					out.writeLong(transaction.getId());
 
-					for (var event : transaction.getEvents()) {
+					for (Event<Long, CobraValue> event : transaction.getEvents()) {
 						switch (event.getType()) {
 						case WRITE: {
 							out.writeByte('W');
-							var value = event.getValue();
+                            CobraValue value = event.getValue();
 							out.writeLong(value.getWriteId());
 							out.writeLong(event.getKey());
 							out.writeLong(value.getValue());
@@ -204,7 +200,7 @@ public class CobraHistoryLoader implements HistoryParser<Long, CobraHistoryLoade
 						}
 						case READ: {
 							out.writeByte('R');
-							var value = event.getValue();
+                            CobraValue value = event.getValue();
 							out.writeLong(value.getTransactionId());
 							out.writeLong(value.getWriteId());
 							out.writeLong(event.getKey());
@@ -223,19 +219,19 @@ public class CobraHistoryLoader implements HistoryParser<Long, CobraHistoryLoade
 
 	@Override
 	public <T, U> History<Long, CobraValue> convertFrom(History<T, U> history) {
-		var events = history.getEvents();
-		var keys = Utils.getIdMap(events.stream().map(ev -> ev.getKey()), 1);
-		var writes = Utils.getIdMap(
+        Collection<Event<T, U>> events = history.getEvents();
+        HashMap<T, Long> keys = Utils.getIdMap(events.stream().map(ev -> ev.getKey()), 1);
+        HashMap<Pair<T, U>, Long> writes = Utils.getIdMap(
 				events.stream().filter(ev -> ev.getType() == WRITE).map(ev -> Pair.of(ev.getKey(), ev.getValue())),
 				0x10000000);
-		var writeTxns = events.stream().filter(ev -> ev.getType() == WRITE)
+        Map<Pair<T, U>, Long> writeTxns = events.stream().filter(ev -> ev.getType() == WRITE)
 				.map(ev -> Pair.of(Pair.of(ev.getKey(), ev.getValue()), ev.getTransaction().getId()))
 				.collect(Collectors.toMap(Pair::getKey, Pair::getValue));
 
-		var txnReads = new HashSet<Pair<Transaction<T, U>, T>>();
-		var txnWrites = new HashMap<Pair<Transaction<T, U>, T>, Integer>();
-		var writeCount = new HashMap<Pair<Transaction<T, U>, T>, Integer>();
-		var incCount = ((BiFunction<Pair<Transaction<T, U>, T>, Integer, Integer>) (k, c) -> {
+        HashSet<Pair<Transaction<T, U>, T>> txnReads = new HashSet<Pair<Transaction<T, U>, T>>();
+        HashMap<Pair<Transaction<T, U>, T>, Integer> txnWrites = new HashMap<Pair<Transaction<T, U>, T>, Integer>();
+        HashMap<Pair<Transaction<T, U>, T>, Integer> writeCount = new HashMap<Pair<Transaction<T, U>, T>, Integer>();
+        BiFunction<Pair<Transaction<T, U>, T>, Integer, Integer> incCount = ((BiFunction<Pair<Transaction<T, U>, T>, Integer, Integer>) (k, c) -> {
 			if (c == null) {
 				return 1;
 			}
@@ -245,12 +241,12 @@ public class CobraHistoryLoader implements HistoryParser<Long, CobraHistoryLoade
 				.forEach(ev -> writeCount.compute(Pair.of(ev.getTransaction(), ev.getKey()), incCount));
 
 		return Utils.convertHistory(history, ev -> {
-			var kv = Pair.of(ev.getKey(), ev.getValue());
-			var id = writes.get(kv);
-			var txnId = ev.getType() == WRITE ? ev.getTransaction().getId() : writeTxns.get(kv);
+            Pair<T, U> kv = Pair.of(ev.getKey(), ev.getValue());
+            Long id = writes.get(kv);
+            long txnId = ev.getType() == WRITE ? ev.getTransaction().getId() : writeTxns.get(kv);
 			return Pair.of(keys.get(ev.getKey()), new CobraValue(id, txnId, id));
 		}, ev -> {
-			var txnAndKey = Pair.of(ev.getTransaction(), ev.getKey());
+            Pair<Transaction<T, U>, T> txnAndKey = Pair.of(ev.getTransaction(), ev.getKey());
 			switch (ev.getType()) {
 			case READ:
 				// only allow one read per txn and must read from others
@@ -263,7 +259,7 @@ public class CobraHistoryLoader implements HistoryParser<Long, CobraHistoryLoade
 			case WRITE:
 				// only allow one write per txn
 				// leave only the last write
-				var count = txnWrites.compute(txnAndKey, incCount);
+                Integer count = txnWrites.compute(txnAndKey, incCount);
 				if (count < writeCount.get(txnAndKey)) {
 					return false;
 				}

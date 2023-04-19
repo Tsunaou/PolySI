@@ -7,12 +7,13 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.InputStreamReader;
 import java.nio.file.Path;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import history.Event;
-import history.History;
-import history.HistoryParser;
+import history.*;
 import history.Event.EventType;
 
 import lombok.Cleanup;
@@ -28,9 +29,9 @@ public class TextHistoryLoader implements HistoryParser<Long, Long> {
 
     @Override
     public <T, U> History<Long, Long> convertFrom(History<T, U> history) {
-        var events = history.getEvents();
-        var keys = Utils.getIdMap(events.stream().map(Event::getKey), 1);
-        var values = Utils.getIdMap(events.stream().map(Event::getValue), 1);
+        Collection<Event<T, U>> events = history.getEvents();
+        HashMap<T, Long> keys = Utils.getIdMap(events.stream().map(Event::getKey), 1);
+        HashMap<U, Long> values = Utils.getIdMap(events.stream().map(Event::getValue), 1);
 
         return Utils.convertHistory(history,
                 ev -> Pair.of(keys.get(ev.getKey()), values.get(ev.getValue())),
@@ -41,26 +42,26 @@ public class TextHistoryLoader implements HistoryParser<Long, Long> {
     @SneakyThrows
     public History<Long, Long> loadHistory() {
         @Cleanup
-        var in = new BufferedReader(new FileReader(textFile));
-        var history = new History<Long, Long>();
-        var regex = Pattern
+        BufferedReader in = new BufferedReader(new FileReader(textFile));
+        History<Long, Long> history = new History<Long, Long>();
+        Pattern regex = Pattern
                 .compile("(r|w)\\((\\d++),(\\d++),(\\d++),(\\d++)\\)");
 
-        var initSession = history.addSession(-1);
-        var initTxn = history.addTransaction(initSession, -1);
-        var keySet = new HashSet<Long>();
+        Session<Long, Long> initSession = history.addSession(-1);
+        Transaction<Long, Long> initTxn = history.addTransaction(initSession, -1);
+        HashSet<Long> keySet = new HashSet<Long>();
 
         in.lines().forEachOrdered((line) -> {
-            var match = regex.matcher(line);
+            Matcher match = regex.matcher(line);
             if (!match.matches()) {
                 throw new Error("Invalid format");
             }
 
-            var op = match.group(1);
-            var key = Long.parseLong(match.group(2));
-            var value = Long.parseLong(match.group(3));
-            var session = Long.parseLong(match.group(4));
-            var txn = Long.parseLong(match.group(5));
+            String op = match.group(1);
+            long key = Long.parseLong(match.group(2));
+            long value = Long.parseLong(match.group(3));
+            long session = Long.parseLong(match.group(4));
+            long txn = Long.parseLong(match.group(5));
 
             if (history.getSession(session) == null) {
                 history.addSession(session);
@@ -87,10 +88,10 @@ public class TextHistoryLoader implements HistoryParser<Long, Long> {
     @SneakyThrows
     public void dumpHistory(History<Long, Long> history) {
         @Cleanup
-        var out = new BufferedWriter(new FileWriter(textFile));
+        BufferedWriter out = new BufferedWriter(new FileWriter(textFile));
 
-        for (var txn : history.getTransactions()) {
-            for (var ev : txn.getEvents()) {
+        for (Transaction<Long, Long> txn : history.getTransactions()) {
+            for (Event<Long, Long> ev : txn.getEvents()) {
                 out.append(String.format("%s(%d,%d,%d,%d)\n",
                         ev.getType().equals(EventType.READ) ? "r" : "w",
                         ev.getKey(), ev.getValue(),

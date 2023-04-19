@@ -29,8 +29,8 @@ public class MatrixGraph<T> implements MutableGraph<T> {
     // private static final int LONG_BITS = 64;
 
     public MatrixGraph(Graph<T> graph) {
-        var topoOrder = topoLogicalSort(graph);
-        var toNodeMap = ((Function<Collection<T>, ImmutableBiMap<T, Integer>>) nodes ->
+        Optional<List<T>> topoOrder = topoLogicalSort(graph);
+        Function<Collection<T>, ImmutableBiMap<T, Integer>> toNodeMap = ((Function<Collection<T>, ImmutableBiMap<T, Integer>>) nodes ->
             Streams.mapWithIndex(nodes.stream(), (n, idx) -> Pair.of(n, (int) idx))
                 .collect(ImmutableBiMap.toImmutableBiMap(Pair::getKey, Pair::getValue)));
 
@@ -42,7 +42,7 @@ public class MatrixGraph<T> implements MutableGraph<T> {
 
         adjacency = newMatrix(nodeMap.size());
         // adjacency = new long[i][(i + LONG_BITS - 1) / LONG_BITS];
-        for (var e : graph.edges()) {
+        for (EndpointPair<T> e : graph.edges()) {
             putEdge(e.source(), e.target());
         }
     }
@@ -51,7 +51,7 @@ public class MatrixGraph<T> implements MutableGraph<T> {
         this.nodeMap = nodeMap;
 
         adjacency = newMatrix(nodeMap.size());
-        for (var e : graph.edges()) {
+        for (EndpointPair<T> e : graph.edges()) {
             putEdge(e.source(), e.target());
         }
     }
@@ -61,7 +61,7 @@ public class MatrixGraph<T> implements MutableGraph<T> {
     }
 
     private static RoaringBitmap[] newMatrix(int size) {
-        var m = new RoaringBitmap[size];
+        RoaringBitmap[] m = new RoaringBitmap[size];
         for (int i = 0; i < size; i++) {
             m[i] = new RoaringBitmap();
         }
@@ -85,12 +85,12 @@ public class MatrixGraph<T> implements MutableGraph<T> {
     // }
 
     private MatrixGraph<T> bfsWithNoCycle(List<Integer> topoOrder) {
-        var result = new MatrixGraph<T>(nodeMap);
+        MatrixGraph<T> result = new MatrixGraph<T>(nodeMap);
 
-        for (var i = topoOrder.size() - 1; i >= 0; i--) {
-            var n = topoOrder.get(i);
+        for (int i = topoOrder.size() - 1; i >= 0; i--) {
+            Integer n = topoOrder.get(i);
 
-            for (var j : successorIds(n).toArray()) {
+            for (int j : successorIds(n).toArray()) {
                 assert topoOrder.indexOf(j) > i;
                 result.set(n, j);
                 result.adjacency[n].or(result.adjacency[j]);
@@ -104,21 +104,21 @@ public class MatrixGraph<T> implements MutableGraph<T> {
     }
 
     private MatrixGraph<T> allNodesBfs() {
-        var topoOrder = topoSortId().orElse(null);
+        List<Integer> topoOrder = topoSortId().orElse(null);
         if (topoOrder != null) {
             return bfsWithNoCycle(topoOrder);
         }
 
-        var result = new MatrixGraph<>(this.nodeMap);
-        var graph = toSparseGraph();
-        for (var i = 0; i < adjacency.length; i++) {
-            var q = new ArrayDeque<Integer>();
+        MatrixGraph<T> result = new MatrixGraph<>(this.nodeMap);
+        Graph<Integer> graph = toSparseGraph();
+        for (int i = 0; i < adjacency.length; i++) {
+            ArrayDeque<Integer> q = new ArrayDeque<Integer>();
 
             q.add(i);
             while (!q.isEmpty()) {
-                var j = q.pop();
+                Integer j = q.pop();
 
-                for (var k : graph.successors(j)) {
+                for (Integer k : graph.successors(j)) {
                     if (result.get(i, k)) {
                         continue;
                     }
@@ -133,7 +133,7 @@ public class MatrixGraph<T> implements MutableGraph<T> {
     }
 
     public MatrixGraph<T> reachability() {
-        var result = allNodesBfs();
+        MatrixGraph<T> result = allNodesBfs();
         for (int i = 0; i < result.nodeMap.size(); i++) {
             result.set(i, i);
         }
@@ -144,9 +144,9 @@ public class MatrixGraph<T> implements MutableGraph<T> {
     private MatrixGraph<T> matrixProduct(MatrixGraph<T> other) {
         assert nodeMap.entrySet().equals(other.nodeMap.entrySet());
 
-        var result = new MatrixGraph<>(nodeMap);
-        for (var i = 0; i < adjacency.length; i++) {
-            for (var j : adjacency[i]) {
+        MatrixGraph<T> result = new MatrixGraph<>(nodeMap);
+        for (int i = 0; i < adjacency.length; i++) {
+            for (Integer j : adjacency[i]) {
                 result.adjacency[i].or(other.adjacency[j]);
             }
         }
@@ -161,8 +161,8 @@ public class MatrixGraph<T> implements MutableGraph<T> {
     public MatrixGraph<T> union(MatrixGraph<T> other) {
         assert nodeMap.entrySet().equals(other.nodeMap.entrySet());
 
-        var result = new MatrixGraph<>(nodeMap);
-        for (var i = 0; i < adjacency.length; i++) {
+        MatrixGraph<T> result = new MatrixGraph<>(nodeMap);
+        for (int i = 0; i < adjacency.length; i++) {
             result.adjacency[i] = RoaringBitmap.or(adjacency[i], other.adjacency[i]);
             // for (var j = 0; j < adjacency[0].length; j++)
             // result.adjacency[i][j] = adjacency[i][j] | other.adjacency[i][j];
@@ -173,22 +173,22 @@ public class MatrixGraph<T> implements MutableGraph<T> {
     }
 
     private Optional<List<Integer>> topoSortId() {
-        var nodes = new ArrayList<Integer>();
-        var inDegrees = new int[adjacency.length];
+        ArrayList<Integer> nodes = new ArrayList<Integer>();
+        int[] inDegrees = new int[adjacency.length];
 
-        for (var i = 0; i < adjacency.length; i++) {
-            for (var j : adjacency[i]) {
+        for (int i = 0; i < adjacency.length; i++) {
+            for (Integer j : adjacency[i]) {
                 inDegrees[j]++;
             }
         }
 
-        for (var i = 0; i < adjacency.length; i++) {
+        for (int i = 0; i < adjacency.length; i++) {
             if (inDegrees[i] == 0) {
                 nodes.add(i);
             }
         }
 
-        for (var i = 0; i < nodes.size(); i++) {
+        for (int i = 0; i < nodes.size(); i++) {
             successorIds(nodes.get(i)).forEach(n -> {
                 if (--inDegrees[n] == 0) {
                     nodes.add(n);
@@ -214,7 +214,7 @@ public class MatrixGraph<T> implements MutableGraph<T> {
         }
 
         for (int i = 0; i < adjacency.length; i++) {
-            for (var j : adjacency[i]) {
+            for (Integer j : adjacency[i]) {
                 graph.putEdge(i, j);
             }
         }
@@ -224,7 +224,7 @@ public class MatrixGraph<T> implements MutableGraph<T> {
 
     @Override
     public String toString() {
-        var builder = new StringBuilder();
+        StringBuilder builder = new StringBuilder();
 
         builder.append('\n');
         for (int i = 0; i < adjacency.length; i++) {
@@ -244,7 +244,7 @@ public class MatrixGraph<T> implements MutableGraph<T> {
             return false;
         }
 
-        var g = (MatrixGraph<T>) obj;
+        MatrixGraph<T> g = (MatrixGraph<T>) obj;
         if (!nodeMap.equals(g.nodeMap)) {
             return false;
         }
@@ -259,11 +259,11 @@ public class MatrixGraph<T> implements MutableGraph<T> {
 
     @Override
     public Set<EndpointPair<T>> edges() {
-        var result = new HashSet<EndpointPair<T>>();
-        var map = nodeMap.inverse();
+        HashSet<EndpointPair<T>> result = new HashSet<EndpointPair<T>>();
+        ImmutableBiMap<Integer, T> map = nodeMap.inverse();
 
         for (int i = 0; i < adjacency.length; i++) {
-            for (var j : adjacency[i]) {
+            for (Integer j : adjacency[i]) {
                 result.add(EndpointPair.ordered(map.get(i), map.get(j)));
             }
         }
@@ -303,7 +303,7 @@ public class MatrixGraph<T> implements MutableGraph<T> {
 
     @Override
     public Set<T> successors(T node) {
-        var inv = nodeMap.inverse();
+        ImmutableBiMap<Integer, T> inv = nodeMap.inverse();
         return successorIds(nodeMap.get(node)).mapToObj(inv::get).collect(Collectors.toSet());
     }
 
@@ -362,8 +362,8 @@ public class MatrixGraph<T> implements MutableGraph<T> {
     }
 
     private int inDegree(int n) {
-        var inDegree = 0;
-        for (var i = 0; i < adjacency.length; i++) {
+        int inDegree = 0;
+        for (int i = 0; i < adjacency.length; i++) {
             inDegree += get(i, n) ? 1 : 0;
         }
 
@@ -388,8 +388,8 @@ public class MatrixGraph<T> implements MutableGraph<T> {
 
     @Override
     public boolean putEdge(T nodeU, T nodeV) {
-        var i = nodeMap.get(nodeU);
-        var j = nodeMap.get(nodeV);
+        Integer i = nodeMap.get(nodeU);
+        Integer j = nodeMap.get(nodeV);
         boolean hasEdge = get(i, j);
         set(i, j);
         return !hasEdge;
@@ -407,8 +407,8 @@ public class MatrixGraph<T> implements MutableGraph<T> {
 
     @Override
     public boolean removeEdge(T nodeU, T nodeV) {
-        var i = nodeMap.get(nodeU);
-        var j = nodeMap.get(nodeV);
+        Integer i = nodeMap.get(nodeU);
+        Integer j = nodeMap.get(nodeV);
         boolean hasEdge = get(i, j);
         clear(i, j);
         return hasEdge;
@@ -420,12 +420,12 @@ public class MatrixGraph<T> implements MutableGraph<T> {
     }
 
     private static <T> Optional<List<T>> topoLogicalSort(Graph<T> graph) {
-        var list = new ArrayList<T>();
-        var nodes = graph.nodes();
-        var inDegrees = new HashMap<T, Integer>();
+        ArrayList<T> list = new ArrayList<T>();
+        Set<T> nodes = graph.nodes();
+        HashMap<T, Integer> inDegrees = new HashMap<T, Integer>();
 
-        for (var n : nodes) {
-            var in = graph.inDegree(n);
+        for (T n : nodes) {
+            int in = graph.inDegree(n);
             inDegrees.put(n, in);
             if (in == 0) {
                 list.add(n);
@@ -433,7 +433,7 @@ public class MatrixGraph<T> implements MutableGraph<T> {
         }
 
         for (int i = 0; i < list.size(); i++) {
-            for (var n : graph.successors(list.get(i))) {
+            for (T n : graph.successors(list.get(i))) {
                 if (inDegrees.compute(n, (k, v) -> v - 1) == 0) {
                     list.add(n);
                 }

@@ -58,8 +58,8 @@ public class Profiler {
     }
 
     private static void updateMemory() {
-        var runtime = Runtime.getRuntime();
-        var currentMax = runtime.totalMemory() - runtime.freeMemory();
+        Runtime runtime = Runtime.getRuntime();
+        long currentMax = runtime.totalMemory() - runtime.freeMemory();
         max_memory.updateAndGet(oldMax -> Long.max(oldMax, currentMax));
     }
 
