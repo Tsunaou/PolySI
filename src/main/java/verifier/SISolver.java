@@ -1,6 +1,7 @@
 package verifier;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -120,7 +121,7 @@ class SISolver<KeyType, ValueType> {
                 solver);
         profiler.endTick("SI_SOLVER_GEN_GRAPH_A_UNION_C");
 
-        List.of(Pair.of('A', graphA), Pair.of('B', graphB)).forEach(p -> {
+        Arrays.asList(Pair.of('A', graphA), Pair.of('B', graphB)).forEach(p -> {
             MutableValueGraph<Transaction<KeyType, ValueType>, Collection<Lit>> g = p.getRight();
             Integer edgesSize = g.edges().stream()
                     .map(e -> g.edgeValue(e).get().size()).reduce(Integer::sum)

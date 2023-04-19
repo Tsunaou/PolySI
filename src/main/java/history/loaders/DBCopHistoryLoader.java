@@ -99,9 +99,22 @@ public class DBCopHistoryLoader implements HistoryParser<Long, Long> {
 
 		@SneakyThrows
 		private String parseString() {
-            long size = in.readLong();
+            // long size = in.readLong();
+			// assert size <= Integer.MAX_VALUE;
+			// return new String(in.readNBytes((int) size), StandardCharsets.UTF_8);
+
+			long size = in.readLong();
 			assert size <= Integer.MAX_VALUE;
-			return new String(in.readNBytes((int) size), StandardCharsets.UTF_8);
+			byte[] buffer = new byte[(int) size];
+			int bytesRead = 0;
+			while (bytesRead < size) {
+				int count = in.read(buffer, bytesRead, (int) size - bytesRead);
+				if (count == -1) {
+					break;
+				}
+				bytesRead += count;
+			}
+			return new String(buffer, StandardCharsets.UTF_8);
 		}
 
 		@SneakyThrows
