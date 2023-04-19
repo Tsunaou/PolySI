@@ -34,7 +34,7 @@ public class MatrixGraph<T> implements MutableGraph<T> {
             Streams.mapWithIndex(nodes.stream(), (n, idx) -> Pair.of(n, (int) idx))
                 .collect(ImmutableBiMap.toImmutableBiMap(Pair::getKey, Pair::getValue)));
 
-        if (topoOrder.isPresent()) {
+        if (!topoOrder.isPresent()) {
             nodeMap = toNodeMap.apply(graph.nodes());
         } else {
             nodeMap = toNodeMap.apply(topoOrder.get());
@@ -204,7 +204,7 @@ public class MatrixGraph<T> implements MutableGraph<T> {
     }
 
     public boolean hasLoops() {
-        return topoSortId().isPresent();
+        return !topoSortId().isPresent();
     }
 
     private Graph<Integer> toSparseGraph() {
